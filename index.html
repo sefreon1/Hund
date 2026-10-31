@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="sv"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hundpromenaden</title>
+<style>
+:root{--bg:#faf7f2;--card:#fff;--tx:#2a2622;--mu:#7a7168;--ac:#e07a2f;--ac2:#2f8f6b;--bd:#e8e1d6;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1815;--card:#26221e;--tx:#f1ece4;--mu:#a39a8e;--ac:#f08d45;--ac2:#4fb88f;--bd:#3a342d;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#1b1815;--card:#26221e;--tx:#f1ece4;--mu:#a39a8e;--ac:#f08d45;--ac2:#4fb88f;--bd:#3a342d;color-scheme:dark}
+*{box-sizing:border-box}html,body{margin:0}
+body{background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;padding-bottom:84px}
+main{max-width:520px;margin:0 auto;padding:14px}
+h1{font-size:22px;margin:4px 0 12px}h2{font-size:17px;margin:18px 0 8px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:14px;margin-bottom:12px}
+.mu{color:var(--mu);font-size:14px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.sp{justify-content:space-between}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.stat{text-align:center}.stat b{display:block;font-size:22px}
+button,select,input{font:inherit;color:var(--tx)}
+button{border:1px solid var(--bd);background:var(--card);border-radius:12px;padding:10px 14px;cursor:pointer}
+button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.big{width:100%;padding:20px;font-size:20px;font-weight:700;border:0;color:#fff;background:var(--ac2);border-radius:18px}
+.big.stop{background:var(--ac)}
+input,select{width:100%;padding:11px;border:1px solid var(--bd);border-radius:12px;background:var(--bg)}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--bd);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav button{flex:1;border:0;border-radius:0;background:none;font-size:12px;padding:10px 2px}
+nav button.on{color:var(--ac);background:none;font-weight:700}
+nav span{display:block;font-size:20px}
+.lb{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--bd)}.lb:last-child{border:0}
+.medal{font-size:24px;width:32px;text-align:center}
+.bar{height:10px;background:var(--bd);border-radius:6px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ac2)}
+.badge{display:inline-block;font-size:12px;border:1px solid var(--bd);border-radius:10px;padding:1px 7px;margin:2px 3px 0 0}
+#sheet{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:flex-end;z-index:20}
+#sheet>div{background:var(--bg);width:100%;max-width:520px;margin:auto auto 0;border-radius:20px 20px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px))}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 12px}
+.scroll{overflow-x:auto}
+svg text{fill:var(--mu);font-size:10px}
+</style></head><body>
+<main id="app"></main><div id="sheet"></div>
+<nav id="nav"></nav>
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import {getAuth,GoogleAuthProvider,signInWithPopup,signOut,onAuthStateChanged} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import {getFirestore,doc,collection,getDoc,setDoc,addDoc,updateDoc,deleteDoc,onSnapshot} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+// 1) Klistra in din Firebase-config här (Projektinställningar > Dina appar > Webbapp)
+const firebaseConfig={apiKey:"AIzaSyCSNuNbvOSw8lkxmcw7IVbE9w92g3Lx1oE",authDomain:"hundpromenaden-4de59.firebaseapp.com",projectId:"hundpromenaden-4de59",storageBucket:"hundpromenaden-4de59.firebasestorage.app",messagingSenderId:"132719525640",appId:"1:132719525640:web:972bf923a3f61ab70936bd"};
+const app0=initializeApp(firebaseConfig),auth=getAuth(app0),fs=getFirestore(app0);
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let uid=null,owner=false,unsubs=[],authState='load',fid=null,invite=null,family=undefined,members=[],walks=[],tab='hem',range=7,openW=null,loaded={f:0,m:0,w:0};
+const gps={m:0,track:[],id:null,last:null};
+const WX=['☀️ Sol','⛅ Mulet','🌧️ Regn','❄️ Snö','💨 Blåsigt'];
+const TABS=[['hem','🐕','Hem'],['topp','🏆','Topplista'],['stat','📊','Statistik'],['hist','🗺️','Historik'],['fam','👨‍👩‍👧','Familj']];
+const mins=w=>Math.max(1,Math.round((w.end-w.start)/60000));
+const done=()=>walks.filter(w=>w.end).sort((a,b)=>b.start-a.start);
+const dayStart=d=>{const x=new Date(d);x.setHours(0,0,0,0);return x.getTime()};
+const wkStart=()=>{const x=new Date();x.setHours(0,0,0,0);x.setDate(x.getDate()-((x.getDay()+6)%7));return x.getTime()};
+const nm=id=>{const m=members.find(m=>m.id===id);return m?m.name:'Okänd'};
+const pts=w=>Math.round(mins(w)+(w.meters||0)/100+(w.pee?2:0)+(w.poo?3:0));
+const dur=m=>m>=60?Math.floor(m/60)+' h '+(m%60)+' min':m+' min';
+const clock=ms=>{const s=Math.floor(ms/1000);return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
+const dm=m=>m>=1000?(m/1000).toFixed(1).replace('.',',')+' km':Math.round(m)+' m';
+const fdate=t=>new Date(t).toLocaleString('sv-SE',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+const me=()=>members.find(m=>m.id===uid);
+const myActive=()=>walks.find(w=>!w.end&&w.by===uid);
+const LEVELS=[[0,'Valpvakt'],[100,'Kopplet-kompis'],[300,'Skogsvandrare'],[600,'Hundviskare'],[1000,'Legend']];
+const level=p=>LEVELS.filter(l=>p>=l[0]).pop()[1];
+
+const rnd=()=>[...crypto.getRandomValues(new Uint8Array(12))].map(b=>(b%36).toString(36)).join('');
+const hm=location.hash.match(/join=(\w+)\.(\w+)/);if(hm)invite={fid:hm[1],code:hm[2]};
+onAuthStateChanged(auth,async u=>{
+  unsubs.forEach(f=>f());unsubs=[];loaded={f:0,m:0,w:0};family=undefined;members=[];walks=[];fid=null;
+  if(!u){uid=null;authState='out';return render()}
+  uid=u.uid;
+  try{const d=await getDoc(doc(fs,'users',uid));fid=d.exists()?d.data().fid:null}catch(e){fid=null}
+  if(!fid){authState='nofam';return render()}
+  startSubs();
+});
+function startSubs(){
+  authState='ready';
+  unsubs=[
+    onSnapshot(doc(fs,'families',fid),d=>{family=d.exists()?d.data():null;owner=!!family&&family.owner===uid;loaded.f=1;render(1)},()=>{family=null;loaded.f=1;render(1)}),
+    onSnapshot(collection(fs,'families',fid,'members'),q=>{members=q.docs.map(d=>Object.assign({id:d.id},d.data()));loaded.m=1;render(1)},()=>{loaded.m=1;render(1)}),
+    onSnapshot(collection(fs,'families',fid,'walks'),q=>{walks=q.docs.map(d=>Object.assign({id:d.id},d.data()));loaded.w=1;render(1)},()=>{loaded.w=1;render(1)})
+  ];
+  render();
+}
+
+setInterval(()=>{const a=myActive(),e=$('#tm');if(a&&e)e.textContent=clock(Date.now()-a.start)},1000);
+
+function render(soft){
+  if(soft&&document.activeElement&&document.activeElement.tagName==='INPUT')return;
+  const app=$('#app'),nav=$('#nav');nav.style.display='none';
+  if(authState==='load')return app.innerHTML='<p class="mu">Laddar…</p>';
+  if(authState==='out')return app.innerHTML=`<div class="card"><h1>🐕 Hundpromenaden</h1><p>${invite?'Du har blivit inbjuden till en hundfamilj. Logga in för att gå med.':'Logga in för att komma igång.'}</p><button class="big" onclick="login()">Logga in med Google</button></div>`;
+  if(authState==='nofam')return app.innerHTML=invite?`<div class="card"><h1>🐕 Gå med i familjen</h1><p class="mu">Du har blivit inbjuden.</p><p>Ditt namn</p><input id="jn" placeholder="Ditt namn"><p><button class="big" onclick="join()">Gå med</button></p></div>`
+    :`<div class="card"><h1>🐕 Skapa familjen</h1><p class="mu">Du blir administratör och kan bjuda in familjen via en länk. Har du fått en inbjudningslänk? Öppna den istället.</p><p>Hundens namn</p><input id="dn" placeholder="t.ex. Bamse"><p>Ditt namn</p><input id="mn" placeholder="Ditt namn"><p><button class="big" onclick="createFam()">Skapa familj</button></p></div>`;
+  if(!(loaded.f&&loaded.m&&loaded.w))return app.innerHTML='<p class="mu">Laddar…</p>';
+  if(!family||!me())return app.innerHTML='<div class="card"><h1>🐕 Hundpromenaden</h1><p>Du är inte med i någon familj längre.</p><button class="big" onclick="leave()">Börja om</button></div>';
+  nav.style.display='flex';
+  nav.innerHTML=TABS.map(t=>`<button class="${tab===t[0]?'on':''}" onclick="go('${t[0]}')"><span>${t[1]}</span>${t[2]}</button>`).join('');
+  app.innerHTML=({hem:vHem,topp:vTopp,stat:vStat,hist:vHist,fam:vFam})[tab]();
+}
+function go(t){tab=t;render()}
+function setR(n){range=n;render()}
+function tw(id){openW=openW===id?null:id;render()}
+async function login(){try{await signInWithPopup(auth,new GoogleAuthProvider())}catch(e){alert('Inloggningen avbröts eller blockerades.')}}
+function logout(){signOut(auth)}
+async function createFam(){
+  const d=$('#dn').value.trim(),n=$('#mn').value.trim();if(!d||!n)return;
+  const id=crypto.randomUUID().replace(/-/g,'').slice(0,20),code=rnd();
+  try{
+    await setDoc(doc(fs,'families',id),{dog:d,owner:uid,code});
+    await setDoc(doc(fs,'families',id,'members',uid),{name:n,kind:'familj',code});
+    await setDoc(doc(fs,'users',uid),{fid:id});fid=id;startSubs();
+  }catch(e){alert('Kunde inte skapa familjen. Kontrollera Firestore-reglerna.')}
+}
+async function join(){
+  const n=$('#jn').value.trim();if(!n)return;
+  try{
+    await setDoc(doc(fs,'families',invite.fid,'members',uid),{name:n,kind:'familj',code:invite.code});
+    await setDoc(doc(fs,'users',uid),{fid:invite.fid});fid=invite.fid;
+    history.replaceState(null,'',location.pathname);invite=null;startSubs();
+  }catch(e){alert('Inbjudan är ogiltig eller har gått ut. Be administratören om en ny länk.')}
+}
+async function leave(){
+  unsubs.forEach(f=>f());unsubs=[];try{await deleteDoc(doc(fs,'users',uid))}catch(e){}
+  fid=null;family=undefined;members=[];walks=[];loaded={f:0,m:0,w:0};authState='nofam';render();
+}
+function vHem(){
+  const a=myActive(),now=Date.now(),t0=dayStart(now),w0=wkStart(),d=done();
+  const sum=(f,from)=>{const l=d.filter(w=>w.start>=from);return{min:l.reduce((s,w)=>s+mins(w),0),m:l.reduce((s,w)=>s+(w.meters||0),0),n:l.length}};
+  const td=sum(0,t0),wk=sum(0,w0);
+  const others=walks.filter(w=>!w.end&&w.by!==uid);
+  const who=members.filter(m=>m.id===uid||m.kind==='extern');
+  let top=a?`<div class="card" style="text-align:center"><div class="mu">${esc(nm(a.mid))} är ute med ${esc(family.dog)}</div><div id="tm" style="font-size:46px;font-weight:700">${clock(now-a.start)}</div><div class="mu" id="gm">${gps.id!=null?dm(gps.m)+' (GPS)':'Ingen GPS – ange sträcka när du kommer hem'}</div><p><button class="big stop" onclick="stopWalk()">🏠 Nu kom jag hem</button></p></div>`
+  :`<div class="card"><p class="mu" style="margin-top:0">Vem går ut med ${esc(family.dog)}?</p><select id="who">${who.map(m=>`<option value="${m.id}">${esc(m.name)}${m.id===uid?' (jag)':' (extern)'}</option>`).join('')}</select><p><button class="big" onclick="startWalk()">🐕 Nu går jag ut</button></p></div>`;
+  return `<h1>🐕 ${esc(family.dog)}</h1>${top}`+others.map(w=>`<div class="card">🚶 <b>${esc(nm(w.mid))}</b> är ute med ${esc(family.dog)} (${dur(Math.max(1,Math.round((now-w.start)/60000)))})${owner?` <button onclick="delWalk('${w.id}')">Avsluta</button>`:''}</div>`).join('')
+  +`<h2>Idag</h2><div class="card grid"><div class="stat"><b>${dur(td.min)}</b><span class="mu">ute</span></div><div class="stat"><b>${dm(td.m)}</b><span class="mu">sträcka</span></div><div class="stat"><b>${td.n}</b><span class="mu">promenader</span></div></div>
+  <h2>Denna vecka</h2><div class="card grid"><div class="stat"><b>${dur(wk.min)}</b><span class="mu">ute</span></div><div class="stat"><b>${dm(wk.m)}</b><span class="mu">sträcka</span></div><div class="stat"><b>${wk.n}</b><span class="mu">promenader</span></div></div>`;
+}
+function startWalk(){
+  const mid=$('#who').value;gps.m=0;gps.track=[];gps.last=null;gps.id=null;
+  try{if(navigator.geolocation)gps.id=navigator.geolocation.watchPosition(p=>{
+    const c=p.coords;if(c.accuracy>40)return;const pt=[c.latitude,c.longitude];
+    if(gps.last){const d=hav(gps.last,pt);if(d<6)return;gps.m+=d}
+    gps.last=pt;gps.track.push(pt);const g=$('#gm');if(g)g.textContent=dm(gps.m)+' (GPS)';
+  },()=>{},{enableHighAccuracy:true,maximumAge:2000})}catch(e){}
+  addDoc(collection(fs,'families',fid,'walks'),{mid,by:uid,start:Date.now(),end:null});
+}
+function hav(a,b){const R=6371000,r=Math.PI/180,dl=(b[0]-a[0])*r,dg=(b[1]-a[1])*r;const x=Math.sin(dl/2)**2+Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dg/2)**2;return 2*R*Math.asin(Math.sqrt(x))}
+function stopWalk(){
+  const w=myActive();if(!w)return;
+  if(gps.id!=null)try{navigator.geolocation.clearWatch(gps.id)}catch(e){}
+  const S={weather:'',pee:false,poo:false};
+  const sh=$('#sheet');sh.style.display='flex';
+  sh.innerHTML=`<div><h2 style="margin-top:0">Hur gick promenaden?</h2>
+  <div class="mu">Väder</div><div class="chips" id="cw">${WX.map(x=>`<button data-v="${x}">${x}</button>`).join('')}</div>
+  <div class="mu">Hunden…</div><div class="chips" id="cb"><button data-k="pee">💧 Kissade</button><button data-k="poo">💩 Bajsade</button><button data-k="none">Inget</button></div>
+  <div class="mu">Sträcka (meter)</div><input id="mt" type="number" inputmode="numeric" value="${Math.round(gps.m)||''}" placeholder="t.ex. 1500">
+  <p class="row"><button style="flex:1" id="cx">Tillbaka</button><button class="big" style="flex:2;padding:14px;font-size:17px" id="sv">Spara</button></p></div>`;
+  $('#cw').onclick=e=>{const b=e.target.closest('button');if(!b)return;S.weather=S.weather===b.dataset.v?'':b.dataset.v;[...$('#cw').children].forEach(c=>c.classList.toggle('on',c.dataset.v===S.weather))};
+  $('#cb').onclick=e=>{const b=e.target.closest('button');if(!b)return;const k=b.dataset.k;if(k==='none'){S.pee=S.poo=false}else S[k]=!S[k];
+    [...$('#cb').children].forEach(c=>c.classList.toggle('on',c.dataset.k==='none'?(!S.pee&&!S.poo&&c.dataset.touched==='1'):S[c.dataset.k]));if(k==='none')b.classList.add('on'),b.dataset.touched='1';else $('#cb').lastChild.dataset.touched='0'};
+  $('#cx').onclick=()=>{sh.style.display='none'};
+  $('#sv').onclick=async()=>{
+    let tr=gps.track,step=Math.ceil(tr.length/150)||1;tr=tr.filter((_,i)=>i%step===0).flatMap(p=>[+p[0].toFixed(5),+p[1].toFixed(5)]);
+    await updateDoc(doc(fs,'families',fid,'walks',w.id),{end:Date.now(),meters:Math.round(+$('#mt').value||0),weather:S.weather,pee:S.pee,poo:S.poo,track:tr});
+    gps.id=null;sh.style.display='none';
+  };
+}
+async function delWalk(id){if(confirm('Ta bort den här promenaden?'))await deleteDoc(doc(fs,'families',fid,'walks',id))}
+
+function stats(from){
+  return members.map(m=>{const l=done().filter(w=>w.mid===m.id&&w.start>=from);
+    return{m,min:l.reduce((s,w)=>s+mins(w),0),dist:l.reduce((s,w)=>s+(w.meters||0),0),n:l.length,p:l.reduce((s,w)=>s+pts(w),0)}}).sort((a,b)=>b.min-a.min);
+}
+function vTopp(){
+  const w=stats(wkStart()),all=stats(0),tot=w.reduce((s,x)=>s+x.min,0),goal=300;
+  const medal=['🥇','🥈','🥉'];
+  return `<h1>🏆 Veckans topplista</h1><div class="card"><div class="row sp"><b>Familjemål: ${goal} min</b><span class="mu">${tot} min</span></div><div class="bar"><i style="width:${Math.min(100,tot/goal*100)}%"></i></div><p class="mu" style="margin-bottom:0">${tot>=goal?`🦴 Målet nått! ${esc(family.dog)} är supernöjd och får en extra godis.`:`Ni behöver ${goal-tot} min till för att ${esc(family.dog)} ska få en godisbelöning.`}</p></div>
+  <div class="card">${w.map((x,i)=>{const ap=all.find(a=>a.m.id===x.m.id),b=[];
+    if(i===0&&x.min>0)b.push('👑 Veckans hundhjälte');if(x.n>=5)b.push('🔥 5+ promenader');if(x.dist>=5000)b.push('🏃 5+ km');if(x.min>=150)b.push('⏱️ 150+ min');
+    return `<div class="lb"><div class="medal">${x.min>0?medal[i]||i+1:'·'}</div><div style="flex:1"><b>${esc(x.m.name)}</b>${x.m.kind==='extern'?' <span class="mu">(extern)</span>':''}<div class="mu">${dur(x.min)} · ${dm(x.dist)} · ${x.n} promenader</div><div>${b.map(t=>`<span class="badge">${t}</span>`).join('')}</div></div><div style="text-align:right"><b>${x.p}</b><div class="mu">p</div></div></div>`}).join('')}</div>
+  <h2>Nivåer (totala poäng)</h2><div class="card">${all.slice().sort((a,b)=>b.p-a.p).map(x=>`<div class="row sp"><span>${esc(x.m.name)}</span><span class="mu">${x.p} p · <b style="color:var(--tx)">${level(x.p)}</b></span></div>`).join('')}
+  <p class="mu" style="margin-bottom:0">Poäng: 1 p per minut, 1 p per 100 m, +2 för kiss, +3 för bajs. Nivåer vid 100, 300, 600 och 1000 p.</p></div>`;
+}
+function vStat(){
+  const n=range,days=[];for(let i=n-1;i>=0;i--){const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-i);days.push(d.getTime())}
+  const val=days.map(t=>done().filter(w=>dayStart(w.start)===t).reduce((s,w)=>s+mins(w),0));
+  const mx=Math.max(30,...val),W=340,H=150,bw=W/n;
+  const bars=val.map((v,i)=>{const h=v/mx*(H-30);const d=new Date(days[i]);
+    return `<rect x="${i*bw+2}" y="${H-20-h}" width="${bw-4}" height="${h}" rx="3" fill="var(--ac)"/>${v&&n<=7?`<text x="${i*bw+bw/2}" y="${H-24-h}" text-anchor="middle">${v}</text>`:''}${n<=7||i%5===0?`<text x="${i*bw+bw/2}" y="${H-6}" text-anchor="middle">${n<=7?['sö','må','ti','on','to','fr','lö'][d.getDay()]:d.getDate()+'/'+(d.getMonth()+1)}</text>`:''}`}).join('');
+  const l=done().filter(w=>w.start>=days[0]),k=(f)=>l.filter(f).length;
+  return `<h1>📊 Statistik</h1><div class="row"><button class="${n===7?'on':''}" onclick="setR(7)">7 dagar</button><button class="${n===30?'on':''}" onclick="setR(30)">30 dagar</button></div>
+  <h2>Minuter ute per dag</h2><div class="card"><svg viewBox="0 0 ${W} ${H}" width="100%">${bars}</svg></div>
+  <div class="card grid"><div class="stat"><b>${dur(val.reduce((a,b)=>a+b,0))}</b><span class="mu">totalt</span></div><div class="stat"><b>${dm(l.reduce((s,w)=>s+(w.meters||0),0))}</b><span class="mu">sträcka</span></div><div class="stat"><b>${l.length}</b><span class="mu">promenader</span></div></div>
+  <div class="card grid"><div class="stat"><b>${k(w=>w.pee)}</b><span class="mu">💧 kiss</span></div><div class="stat"><b>${k(w=>w.poo)}</b><span class="mu">💩 bajs</span></div><div class="stat"><b>${k(w=>!w.pee&&!w.poo)}</b><span class="mu">inget</span></div></div>`;
+}
+function vHist(){
+  const d=done().slice(0,40);
+  return `<h1>🗺️ Historik</h1>`+(d.length?d.map(w=>`<div class="card" onclick="tw('${w.id}')"><div class="row sp"><b>${esc(nm(w.mid))}</b><span class="mu">${fdate(w.start)}</span></div>
+   <div class="mu">${dur(mins(w))} · ${dm(w.meters||0)} ${w.weather?'· '+esc(w.weather):''} ${w.pee?'· 💧':''}${w.poo?' 💩':''}${!w.pee&&!w.poo?'· inget':''}</div>${openW===w.id?mapSvg(w)+(owner?`<p><button onclick="event.stopPropagation();delWalk('${w.id}')">Ta bort</button></p>`:''):''}</div>`).join(''):'<p class="mu">Inga promenader ännu.</p>');
+}
+function mapSvg(w){
+  const f=w.track||[],t=[];for(let i=0;i+1<f.length;i+=2)t.push([f[i],f[i+1]]);if(t.length<2)return '<p class="mu">Ingen GPS-rutt sparades för den här promenaden.</p>';
+  const la=t.map(p=>p[0]),lo=t.map(p=>p[1]),k=Math.cos(la[0]*Math.PI/180),y0=Math.min(...la),y1=Math.max(...la),x0=Math.min(...lo),x1=Math.max(...lo);
+  const W=320,H=200,P=14,sx=(x1-x0)*k||1e-5,sy=(y1-y0)||1e-5,s=Math.min((W-2*P)/sx,(H-2*P)/sy);
+  const X=p=>P+(p[1]-x0)*k*s+((W-2*P)-sx*s)/2,Y=p=>H-P-(p[0]-y0)*s-((H-2*P)-sy*s)/2;
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="background:var(--bg);border-radius:12px;margin-top:8px"><polyline points="${t.map(p=>X(p).toFixed(1)+','+Y(p).toFixed(1)).join(' ')}" fill="none" stroke="var(--ac)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${X(t[0])}" cy="${Y(t[0])}" r="5" fill="var(--ac2)"/><circle cx="${X(t[t.length-1])}" cy="${Y(t[t.length-1])}" r="5" fill="var(--ac)" stroke="var(--tx)"/><text x="${P}" y="${H-3}">Start (grön) → mål · ${dm(w.meters||0)}</text></svg>`;
+}
+const link=()=>location.origin+location.pathname+'#join='+fid+'.'+family.code;
+function vFam(){
+  return `<h1>👨‍👩‍👧 Familjen</h1><div class="card">${members.map(m=>`<div class="lb"><div style="flex:1"><b>${esc(m.name)}</b> <span class="mu">${family.owner===m.id?'administratör':m.kind==='extern'?'extern hundpassare':'familjemedlem'}</span></div>${owner&&m.id!==uid?`<button onclick="rmMember('${m.id}')">Ta bort</button>`:''}</div>`).join('')}</div>`
+  +(owner?`<h2>Lägg till extern hundpassare</h2><div class="card"><div class="row"><input id="en" placeholder="Namn" style="flex:1;width:auto"><button onclick="addExt()">Lägg till</button></div><p class="mu" style="margin-bottom:0">Externa passare behöver inget konto – ni väljer dem i listan när en promenad startas åt dem.</p></div>
+  <h2>Bjud in familjemedlemmar</h2><div class="card"><p style="margin-top:0">Skicka länken. Den som öppnar den loggar in med Google, skriver sitt namn och är med.</p><div class="mu" style="word-break:break-all;margin-bottom:8px">${esc(link())}</div><div class="row"><button onclick="share()">📤 Dela länk</button><button onclick="newCode()">🔄 Byt kod</button></div><p class="mu" style="margin-bottom:0">Byter du kod slutar den gamla länken fungera.</p></div>`:'<p class="mu">Administratören bjuder in nya familjemedlemmar.</p>')
+  +'<p><button onclick="logout()">Logga ut</button></p>';
+}
+async function addExt(){const n=$('#en').value.trim();if(n)await addDoc(collection(fs,'families',fid,'members'),{name:n,kind:'extern'})}
+async function rmMember(id){if(confirm('Ta bort personen? Tidigare promenader behålls.'))await deleteDoc(doc(fs,'families',fid,'members',id))}
+async function newCode(){if(confirm('Byta kod? Den gamla länken slutar fungera.'))await updateDoc(doc(fs,'families',fid),{code:rnd()})}
+function share(){const u=link();if(navigator.share)navigator.share({title:'Hundpromenaden',url:u}).catch(()=>{});else try{navigator.clipboard.writeText(u);alert('Länk kopierad')}catch(e){}}
+Object.assign(window,{go,setR,tw,login,logout,createFam,join,leave,startWalk,stopWalk,delWalk,addExt,rmMember,newCode,share});
+</script></body></html>
